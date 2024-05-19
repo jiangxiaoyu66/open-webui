@@ -1,18 +1,10 @@
 # syntax=docker/dockerfile:1
-# Initialize device type args
-# use build args in the docker build commmand with --build-arg="BUILDARG=true"
-ARG USE_CUDA=false
-ARG USE_OLLAMA=false
-# Tested with cu117 for CUDA 11 and cu121 for CUDA 12 (default)
-ARG USE_CUDA_VER=cu121
-# any sentence transformer model; models to use can be found at https://huggingface.co/models?library=sentence-transformers
-# Leaderboard: https://huggingface.co/spaces/mteb/leaderboard 
-# for better performance and multilangauge support use "intfloat/multilingual-e5-large" (~2.5GB) or "intfloat/multilingual-e5-base" (~1.5GB)
-# IMPORTANT: If you change the embedding model (sentence-transformers/all-MiniLM-L6-v2) and vice versa, you aren't able to use RAG Chat with your previous documents loaded in the WebUI! You need to re-embed them.
+# 初始化设备类型参数
+# 在 docker build 命令中使用 --build-arg="BUILDARG=true" 来使用构建参数
 ARG USE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ARG USE_RERANKING_MODEL=""
 
-######## WebUI frontend ########
+######## WebUI 前端 ########
 FROM --platform=$BUILDPLATFORM node:21-alpine3.19 as build
 
 WORKDIR /app
@@ -23,55 +15,45 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-######## WebUI backend ########
+######## WebUI 后端 ########
 FROM python:3.11-slim-bookworm as base
 
-# Use args
-ARG USE_CUDA
-ARG USE_OLLAMA
-ARG USE_CUDA_VER
+# 使用参数
 ARG USE_EMBEDDING_MODEL
 ARG USE_RERANKING_MODEL
 
-## Basis ##
+## 基础设置 ##
 ENV ENV=prod \
     PORT=8080 \
-    # pass build args to the build
-    USE_OLLAMA_DOCKER=${USE_OLLAMA} \
-    USE_CUDA_DOCKER=${USE_CUDA} \
-    USE_CUDA_DOCKER_VER=${USE_CUDA_VER} \
     USE_EMBEDDING_MODEL_DOCKER=${USE_EMBEDDING_MODEL} \
     USE_RERANKING_MODEL_DOCKER=${USE_RERANKING_MODEL}
 
-## Basis URL Config ##
-ENV OLLAMA_BASE_URL="/ollama" \
-    OPENAI_API_BASE_URL=""
+## 基础 URL 配置 ##
+ENV OPENAI_API_BASE_URL=""
 
-## API Key and Security Config ##
+## API Key 和安全配置 ##
 ENV OPENAI_API_KEY="" \
     WEBUI_SECRET_KEY="" \
     SCARF_NO_ANALYTICS=true \
     DO_NOT_TRACK=true \
     ANONYMIZED_TELEMETRY=false
 
-# Use locally bundled version of the LiteLLM cost map json
-# to avoid repetitive startup connections
+# 使用本地捆绑的 LiteLLM 成本图 json 以避免重复的启动连接
 ENV LITELLM_LOCAL_MODEL_COST_MAP="True"
 
-
-#### Other models #########################################################
-## whisper TTS model settings ##
+#### 其他模型 #########################################################
+## whisper TTS 模型设置 ##
 ENV WHISPER_MODEL="base" \
     WHISPER_MODEL_DIR="/app/backend/data/cache/whisper/models"
 
-## RAG Embedding model settings ##
+## RAG 嵌入模型设置 ##
 ENV RAG_EMBEDDING_MODEL="$USE_EMBEDDING_MODEL_DOCKER" \
     RAG_RERANKING_MODEL="$USE_RERANKING_MODEL_DOCKER" \
     SENTENCE_TRANSFORMERS_HOME="/app/backend/data/cache/embedding/models"
 
-## Hugging Face download cache ##
+## Hugging Face 下载缓存 ##
 ENV HF_HOME="/app/backend/data/cache/embedding/models"
-#### Other models ##########################################################
+#### 其他模型 ##########################################################
 
 WORKDIR /app/backend
 
@@ -79,57 +61,32 @@ ENV HOME /root
 RUN mkdir -p $HOME/.cache/chroma
 RUN echo -n 00000000-0000-0000-0000-000000000000 > $HOME/.cache/chroma/telemetry_user_id
 
-RUN if [ "$USE_OLLAMA" = "true" ]; then \
-        apt-get update && \
-        # Install pandoc and netcat
-        apt-get install -y --no-install-recommends pandoc netcat-openbsd && \
-        # for RAG OCR
-        apt-get install -y --no-install-recommends ffmpeg libsm6 libxext6 && \
-        # install helper tools
-        apt-get install -y --no-install-recommends curl && \
-        # install ollama
-        curl -fsSL https://ollama.com/install.sh | sh && \
-        # cleanup
-        rm -rf /var/lib/apt/lists/*; \
-    else \
-        apt-get update && \
-        # Install pandoc and netcat
-        apt-get install -y --no-install-recommends pandoc netcat-openbsd && \
-        # for RAG OCR
-        apt-get install -y --no-install-recommends ffmpeg libsm6 libxext6 && \
-        # cleanup
-        rm -rf /var/lib/apt/lists/*; \
-    fi
-
-# install python dependencies
+# 安装 Python 依赖项
 COPY ./backend/requirements.txt ./requirements.txt
 
-RUN pip3 install uv && \
-    if [ "$USE_CUDA" = "true" ]; then \
-        # If you use CUDA the whisper and embedding model will be downloaded on first use
-        pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/$USE_CUDA_DOCKER_VER --no-cache-dir && \
-        uv pip install --system -r requirements.txt --no-cache-dir && \
-        python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')" && \
-        python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
-    else \
-        pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir && \
-        uv pip install --system -r requirements.txt --no-cache-dir && \
-        python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')" && \
-        python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
-    fi
+# RUN pip3 install uvicorn && \
+#     pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir && \
+#     pip install --system -r requirements.txt --no-cache-dir && \
+#     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')" && \
+#     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"
+
+RUN pip3 install uvicorn 
+# RUN     pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir 
+RUN     pip3 install torch torchvision torchaudio --index-url https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir 
+# RUN    pip3 install --system -r requirements.txt --no-cache-dir
+RUN   pip install  -r requirements.txt --no-cache-dir
+
+RUN python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"
+
+RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"
 
 
-
-# copy embedding weight from build
-# RUN mkdir -p /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2
-# COPY --from=build /app/onnx /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx
-
-# copy built frontend files
+# 复制构建的前端文件
 COPY --from=build /app/build /app/build
 COPY --from=build /app/CHANGELOG.md /app/CHANGELOG.md
 COPY --from=build /app/package.json /app/package.json
 
-# copy backend files
+# 复制后端文件
 COPY ./backend .
 
 EXPOSE 8080

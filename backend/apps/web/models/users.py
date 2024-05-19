@@ -5,7 +5,7 @@ from typing import List, Union, Optional
 import time
 from utils.misc import get_gravatar_url
 
-from apps.web.internal.db import DB
+from apps.web.internal.db import DB # 数据库引入
 from apps.web.models.chats import Chats
 
 ####################
